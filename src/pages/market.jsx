@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect,useRef} from 'react';
 import CryptoChart from '../components/CryptoChart.jsx';
 import axios from 'axios';
 import '../styles/market.css';
@@ -16,11 +16,13 @@ const Market = () => {
   const [exchangePopupOpen, setExchangePopupOpen] = useState(false);
   const [transactionAmount, setTransactionAmount] = useState('');
   const [balance, setBalance] = useState(0);
-  const [userId, setUserId] = useState('null');
-  const [cryptoId, setCryptoId] = useState('null');
   const [crypto, setCrypto] = useState([]);
   const [exchangeCrypto, setExchangeCrypto] = useState('');
   const [isLoggedIn, setLoggedIn] = useState(false);
+  const [user, setUser] = useState(null);
+  const [loadingAuth, setLoadingAuth] = useState(true); // New state for loading auth
+  const docIdRef = useRef(null);
+  const cryptoIdRef = useRef(null);
 
   useEffect(() => {
     const fetchCryptoData = async () => {
@@ -51,27 +53,53 @@ const Market = () => {
   }, []);
 
   useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((currentUser) => {
+      if (currentUser) {
+        setLoggedIn(true);
+        setUser(currentUser);
+      } else {
+        setLoggedIn(false);
+        setUser(null);
+      }
+      setLoadingAuth(false); 
+    });
+
+    // Cleanup the listener when the component unmounts
+    console.log(isLoggedIn)
+    return () => unsubscribe();
+  }, []);
+  useEffect(() => {
     const fetchData = async () => {
       try {
-        const user = auth.currentUser;
-        if (user) {
+        if (user && user.uid) {
+          let fetchedBalance = 0;
+          let fetchedCrypto = {};
+
           // Fetch user balance
           const balanceQuery = query(collection(firestore, 'User Info'), where('email', '==', user.email));
           const balanceQuerySnapshot = await getDocs(balanceQuery);
           balanceQuerySnapshot.forEach((doc) => {
-            setUserId(doc.id);
-            setBalance(doc.data().balance);
+            fetchedBalance = doc.data().balance;
+            docIdRef.current = doc.id;
           });
-  
+
           // Fetch crypto holdings
-          const holdingsQuery = query(collection(firestore, 'cryptoHoldings'), where('userID', '==', userId));
+          const holdingsQuery = query(collection(firestore, 'cryptoHoldings'), where('userID', '==',docIdRef.current));
           const holdingsQuerySnapshot = await getDocs(holdingsQuery);
           holdingsQuerySnapshot.forEach((doc) => {
-            setCryptoId(doc.id);
-            setCrypto(doc.data());
+            console.log(doc.id)
+            fetchedCrypto = doc.data();
+            cryptoIdRef.current=doc.id// Store crypto doc ID
           });
+
+          // Update balance and crypto states
+          setBalance(fetchedBalance);
+          setCrypto(fetchedCrypto);
+
+          // If you need to immediately use fetched balance and holdings:
+          console.log("Fetched Balance:", fetchedBalance);
+          console.log("Fetched Crypto Holdings:", fetchedCrypto);
         } else {
-          // If user is not logged in, set balance to 0 and crypto holdings to empty
           setBalance(0);
           setCrypto({});
         }
@@ -79,21 +107,10 @@ const Market = () => {
         console.error('Error fetching user data:', error);
       }
     };
-  
-    fetchData();
-  }, [userId]);
-  
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(user => {
-        if (user) {
-           setLoggedIn(true);
-        } else{
-          setLoggedIn(false)
-        }
-    });
 
-    return () => unsubscribe();
-}, []);
+    fetchData();
+  }, [user, loadingAuth]);
+  
 
   const handleSelectCoin = (coin) => {
     selectSelectedCoin(coin);
@@ -140,17 +157,18 @@ const Market = () => {
 
         if (buyPopupOpen) {
           const requiredAmount = totalTransactionValue * coinPrice;
-          console.log(userId)
           if (requiredAmount > balance) {
+            console.log(balance)
             console.error('Insufficient balance for this transaction.');
             alert('Insufficient balance for this transaction.')
             return;
           }
           const newBalance = balance - requiredAmount;
-          const userDocRef = doc(firestore, 'User Info', userId);
+          console.log(newBalance)
+          const userDocRef = doc(firestore, 'User Info', docIdRef.current);
           await updateDoc(userDocRef, { "balance": newBalance });
 
-          const cryptoHoldingsRef = doc(firestore, 'cryptoHoldings', cryptoId);
+          const cryptoHoldingsRef = doc(firestore, 'cryptoHoldings', cryptoIdRef.current);
           const updatedHoldings = { ...crypto };
           if (updatedHoldings.holdings[selectedCoin]) {
             updatedHoldings.holdings[selectedCoin] += totalTransactionValue;
@@ -166,18 +184,21 @@ const Market = () => {
             date : new Date(),
             currency: selectedCoin,
             recipient: "",
-            userID: userId,
+            userID: docIdRef.current,
           });
           alert("You successfully purchased "+totalTransactionValue+" " +selectedCoin+" for "+transactionAmount+"$")
+          setBalance(newBalance)
+          console.log(updatedHoldings)
+          setCrypto(updatedHoldings)
         } else if (sellPopupOpen) {
           const updatedHoldings = { ...crypto };
           console.log(updatedHoldings.holdings[selectedCoin])
           if (updatedHoldings.holdings[selectedCoin]) {
             if (updatedHoldings.holdings[selectedCoin] >= totalTransactionValue) {
               const newBalance = balance + (totalTransactionValue * coinPrice);
-              const userDocRef = doc(firestore, 'User Info', userId);
+              const userDocRef = doc(firestore, 'User Info', docIdRef.current);
               await updateDoc(userDocRef,{"balance":newBalance})
-              const cryptoHoldingsRef = doc(firestore, 'cryptoHoldings', cryptoId);
+              const cryptoHoldingsRef = doc(firestore, 'cryptoHoldings', cryptoIdRef.current);
               updatedHoldings.holdings[selectedCoin] -= totalTransactionValue;
               await updateDoc(cryptoHoldingsRef, updatedHoldings);
               await  addDoc(collection(firestore, 'transaction history'),{  
@@ -188,9 +209,11 @@ const Market = () => {
                 date : new Date(),
                 currency: selectedCoin,
                 recipient: "",
-                userID: userId,
+                userID: docIdRef.current,
               });
               alert("You successfully sold "+totalTransactionValue+" "+selectedCoin+" for "+transactionAmount+"$")
+              setBalance(newBalance)
+              setCrypto(updatedHoldings)
             } else {
               console.error('Insufficient holdings for this transaction.');
               alert("Insufficient " +selectedCoin+" holdings for this transaction.");
@@ -218,7 +241,7 @@ const Market = () => {
                     console.log(equivalent)
                     //updatedHoldings.holdings[exchangeCrypto]+=equivalent
                     updatedHoldings.holdings[exchangeCrypto] = (updatedHoldings.holdings[exchangeCrypto] || 0) + equivalent;
-                    const cryptoHoldingsRef = doc(firestore, 'cryptoHoldings', cryptoId);
+                    const cryptoHoldingsRef = doc(firestore, 'cryptoHoldings', cryptoIdRef.current);
                     console.log("processing")
                     await updateDoc(cryptoHoldingsRef, updatedHoldings);
                     await  addDoc(collection(firestore, 'transaction history'),{  
@@ -230,10 +253,12 @@ const Market = () => {
                       currency: selectedCoin,
                       convertedTo: exchangeCrypto,
                       recipient: "",
-                      userID: userId,
+                      userID: docIdRef.current,
                     });
                     console.log("updated")
                     alert("You successfully Exchanged "+transactionAmount+" "+selectedCoin+" for " +equivalent+" "+exchangeCrypto)
+                    setCrypto(updatedHoldings)
+                    console.log(updatedHoldings)
                 }else{
                     console.log("not enough holdings")
                     alert("Not enough " +selectedCoin+" holdings")
@@ -256,7 +281,7 @@ const Market = () => {
     }
   };
 
-  if (loading) {
+  if (loading || loadingAuth) {
     return <div className="market-container">Loading market data...</div>;
   }
 
