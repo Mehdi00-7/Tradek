@@ -1,4 +1,4 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app)
+I built a trading platform using Next.js that taught me key skills, including API integration, authentication, and forum development. The project provided hands-on experience in creating a secure and interactive application with modern web technologies.
 
 ## Getting Started
 
