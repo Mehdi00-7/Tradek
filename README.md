@@ -39,7 +39,6 @@ Below are some screenshots of the Tradek application:
 ![alt text](<Screenshot from 2025-09-17 15-43-55.png>)
 ![alt text](<Screenshot from 2025-09-17 15-44-42.png>)
 ![alt text](<Screenshot from 2025-09-17 15-45-04.png>)
-_Replace the image paths above with your actual screenshot files in the `screenshots/` directory._
 
 ## Getting Started
 
